@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-// import { createClient } from "@/app/lib/supabase/client";
-import { createClient } from "../../lib/supabase/client";
+import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -33,7 +32,7 @@ export default function LoginPage() {
     }
 
     if (data?.user) {
-      // Query the user's role to determine where to redirect them
+      // Fetch user role from profiles table
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("role")
@@ -41,21 +40,22 @@ export default function LoginPage() {
         .single();
 
       if (profileError) {
-      // Explicitly grab the message from the Postgres error object!
-      setError(`Database Profile Error: ${profileError.message} (Code: ${profileError.code})`);
-      setLoading(false);
-      return;
-    }
+        setError(`Database Profile Error: ${profileError.message} (Code: ${profileError.code})`);
+        setLoading(false);
+        return;
+      }
 
-    if (!profile) {
-      setError("Account authenticated successfully, but no matching database profile row was found.");
-      setLoading(false);
-      return;
-    }
+      if (!profile) {
+        setError("Account authenticated successfully, but no matching profile record was found.");
+        setLoading(false);
+        return;
+      }
 
-      // Role-based routing redirection
+      // Explicit Role-Based Redirection
       if (profile.role === "buyer_admin") {
         router.push("/rfq/new");
+      } else if (profile.role === "supplier_admin") {
+        router.push("/dashboard/onboarding");
       } else {
         router.push("/dashboard");
       }

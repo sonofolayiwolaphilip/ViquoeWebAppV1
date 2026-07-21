@@ -1,3 +1,5 @@
+"use server";
+
 import { createClient } from "./server";
 
 // 1. Define explicit types matching our Database & UI contracts

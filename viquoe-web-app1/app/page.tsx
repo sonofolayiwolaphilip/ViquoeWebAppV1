@@ -21,7 +21,7 @@ export default function HomePage() {
           Access Buyer Form
         </Link>
         <Link 
-          href="/dashboard" 
+          href="/dashboard/onboarding" 
           className="px-6 py-3 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 font-medium text-sm rounded-xl transition shadow-sm"
         >
           Access Supplier Portal
