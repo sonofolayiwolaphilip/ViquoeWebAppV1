@@ -11,7 +11,7 @@ export async function proxy(request: NextRequest) {
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
     {
       cookies: {
         getAll() {
@@ -49,7 +49,7 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL('/dashboard', request.url));
       }
       if (path.startsWith('/dashboard') && profile.role !== 'supplier_admin') {
-        return NextResponse.redirect(new URL('/buyer/rfq/new', request.url));
+        return NextResponse.redirect(new URL('/login', request.url));
       }
     }
   }
