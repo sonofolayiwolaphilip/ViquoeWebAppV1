@@ -2,13 +2,14 @@
 
 import { createClient } from "./server";
 
-// 1. Define explicit types matching our Database & UI contracts
+// 1. Define explicit types matching Database & UI contracts
 export interface RfqInsertData {
   buyer_id: string;
   title: string;
   category: string;
   delivery_address: string;
   deadline: string;
+  status?: string; // Included optional status to match form payload
 }
 
 export interface RfqItemInsertData {
@@ -24,59 +25,92 @@ export interface SupplierVerificationData {
   address_proof_url: string;
 }
 
-// Initialize the server-side client instance
+// Action response contract
+export type ActionResponse<T> =
+  | { success: true; data: T }
+  | { success: false; error: string };
+
+// Helper to instantiate server client
 const getSupabaseClient = async () => {
   return await createClient();
 };
 
-// 2. Insert RFQ with explicit TypeScript types
+// 2. Insert RFQ with safe error handling
 export async function insertNewRfq(
-  rfqData: RfqInsertData, 
+  rfqData: RfqInsertData,
   lineItems: RfqItemInsertData[]
-) {
-  const supabase = await getSupabaseClient();
+): Promise<ActionResponse<unknown>> {
+  try {
+    const supabase = await getSupabaseClient();
 
-  // Insert the parent RFQ record
-  const { data: rfq, error: rfqError } = await supabase
-    .from('rfqs')
-    .insert([rfqData])
-    .select()
-    .single();
+    // Insert parent RFQ record
+    const { data: rfq, error: rfqError } = await supabase
+      .from("rfqs")
+      .insert([
+        {
+          ...rfqData,
+          status: rfqData.status || "active",
+        },
+      ])
+      .select()
+      .single();
 
-  if (rfqError) throw rfqError;
+    if (rfqError) {
+      console.error("RFQ Database Error:", rfqError);
+      return { success: false, error: rfqError.message };
+    }
 
-  // Map line items to the new RFQ ID and insert them atomically
-  const formattedItems = lineItems.map(item => ({
-    rfq_id: rfq.id,
-    description: item.description,
-    quantity: item.quantity
-  }));
+    // Map line items to the new RFQ ID
+    const formattedItems = lineItems.map((item) => ({
+      rfq_id: rfq.id,
+      description: item.description,
+      quantity: item.quantity,
+    }));
 
-  const { error: itemsError } = await supabase
-    .from('rfq_items')
-    .insert(formattedItems);
+    const { error: itemsError } = await supabase
+      .from("rfq_items")
+      .insert(formattedItems);
 
-  if (itemsError) throw itemsError;
-  return rfq;
+    if (itemsError) {
+      console.error("RFQ Items Database Error:", itemsError);
+      return { success: false, error: itemsError.message };
+    }
+
+    return { success: true, data: rfq };
+  } catch (err: unknown) {
+    console.error("insertNewRfq Exception:", err);
+    const errorMsg =
+      err instanceof Error ? err.message : "An unexpected server error occurred.";
+    return { success: false, error: errorMsg };
+  }
 }
 
-// 3. Submit verification with explicit TypeScript types
+// 3. Submit supplier verification
 export async function submitSupplierVerification(
   verificationData: SupplierVerificationData
-) {
-  const supabase = await getSupabaseClient();
+): Promise<ActionResponse<unknown>> {
+  try {
+    const supabase = await getSupabaseClient();
 
-  const { data, error } = await supabase
-    .from("supplier_verification")
-    .upsert([verificationData]); 
+    const { data, error } = await supabase
+      .from("supplier_verification")
+      .upsert([verificationData]);
 
-  if (error) throw error;
-  return data;
+    if (error) {
+      console.error("Supplier Verification Error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, data };
+  } catch (err: unknown) {
+    console.error("submitSupplierVerification Exception:", err);
+    const errorMsg =
+      err instanceof Error ? err.message : "Failed to submit verification.";
+    return { success: false, error: errorMsg };
+  }
 }
 
-// Add these to app/lib/supabase/actions.ts
-
-// 1. For Buyer Dashboard: Fetch all RFQs published by the logged-in buyer
+// 4. Fetch Buyer RFQs
 export async function getBuyerRfqs(buyerId: string) {
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase
@@ -102,7 +136,7 @@ export async function getBuyerRfqs(buyerId: string) {
   return data;
 }
 
-// 2. For Supplier Dashboard: Fetch all active RFQs in the marketplace that they can bid on
+// 5. Fetch Active Marketplace RFQs
 export async function getActiveMarketplaceRfqs() {
   const supabase = await getSupabaseClient();
   const { data, error } = await supabase

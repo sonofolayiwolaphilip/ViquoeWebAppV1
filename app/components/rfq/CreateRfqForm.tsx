@@ -87,7 +87,17 @@ export default function CreateRfqForm() {
       }));
 
       // 3. Persist directly to Supabase via server action
-      await insertNewRfq(rfqData, lineItems);
+      const result = await insertNewRfq(rfqData, lineItems);
+
+      if (!result.success) {
+        setErrorMessage(result.error);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 4. Redirect buyer to dashboard upon success
+      router.push("/dashboard/rfqs");
+      router.refresh();
 
       // 4. Redirect buyer to their dashboard where the RFQ is listed
       router.push("/dashboard/rfqs");
