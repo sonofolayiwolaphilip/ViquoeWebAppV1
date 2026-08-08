@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client"; // Adjust path to your browser client helper
+import { insertNewRfq } from "@/lib/supabase/actions"; // Adjust path to server action file
 
 interface LineItem {
   id: string;
@@ -9,60 +12,124 @@ interface LineItem {
 }
 
 export default function CreateRfqForm() {
+  const router = useRouter();
+  const supabase = createClient();
+
   const [items, setItems] = useState<LineItem[]>([
     { id: crypto.randomUUID(), description: "", quantity: 1 },
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleAddItem = () => {
-    setItems([...items, { id: crypto.randomUUID(), description: "", quantity: 1 }]);
+    setItems((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), description: "", quantity: 1 },
+    ]);
   };
 
   const handleRemoveItem = (id: string) => {
     if (items.length > 1) {
-      setItems(items.filter((item) => item.id !== id));
+      setItems((prev) => prev.filter((item) => item.id !== id));
     }
   };
 
-  const handleItemChange = (id: string, field: keyof LineItem, value: string | number) => {
-    setItems(
-      items.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+  const handleItemChange = (
+    id: string,
+    field: keyof LineItem,
+    value: string | number
+  ) => {
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const formElement = e.currentTarget;
+    const formData = new FormData(formElement);
+
     setIsSubmitting(true);
+    setErrorMessage(null);
 
-    const formData = new FormData(e.currentTarget);
-    const rfqData = {
-      title: formData.get("title"),
-      category: formData.get("category"),
-      deliveryAddress: formData.get("deliveryAddress"),
-      deadline: formData.get("deadline"),
-      items: items.map(({ description, quantity }) => ({ description, quantity })),
-    };
+    try {
+      // 1. Verify user authentication session
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-    // TODO: Connect to Supabase API endpoint next
-    console.log("Submitting RFQ Data:", rfqData);
-    
-    setTimeout(() => {
+      if (authError || !user) {
+        // Prompt login if buyer is not signed in
+        const shouldLogin = window.confirm(
+          "You must be logged in to post an RFQ and track supplier responses. Would you like to log in or register now?"
+        );
+        if (shouldLogin) {
+          router.push("/login?redirect=/rfq/create");
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 2. Format payload matching backend schema and explicit types
+      const rfqData = {
+        buyer_id: user.id,
+        title: formData.get("title") as string,
+        category: formData.get("category") as string,
+        delivery_address: formData.get("deliveryAddress") as string,
+        deadline: formData.get("deadline") as string,
+        status: "active", // Crucial: matches .eq("status", "active") in supplier query
+      };
+
+      const lineItems = items.map(({ description, quantity }) => ({
+        description,
+        quantity: Number(quantity),
+      }));
+
+      // 3. Persist directly to Supabase via server action
+      await insertNewRfq(rfqData, lineItems);
+
+      // 4. Redirect buyer to their dashboard where the RFQ is listed
+      router.push("/dashboard/rfqs");
+      router.refresh();
+    } catch (err : unknown) {
+      if (err instanceof Error) {
+      setErrorMessage(err.message);
+      } else if (typeof err === "string"){
+        setErrorMessage(err);
+      } else{
+        setErrorMessage("failed to submit RFQ. Please try again");
+      }
+    } finally {
       setIsSubmitting(false);
-      alert("RFQ Draft Created Successfully!");
-    }, 1000);
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto p-6 bg-white border border-slate-200 rounded-xl shadow-sm">
+    <form onSubmit={handleSubmit}
+      className="max-w-4xl mx-auto p-6 bg-white border border-slate-200 rounded-xl shadow-sm"
+    >
       <div className="border-b border-slate-100 pb-4 mb-6">
-        <h2 className="text-xl font-semibold text-slate-900 font-heading">Create New Request for Quote</h2>
-        <p className="text-sm text-slate-500 mt-1">Fill out the details below to broadcast your requirements to verified suppliers.</p>
+        <h2 className="text-xl font-semibold text-slate-900 font-heading">
+          Create New Request for Quote
+        </h2>
+        <p className="text-sm text-slate-500 mt-1">
+          Fill out the details below to broadcast your requirements to verified suppliers.
+        </p>
       </div>
+
+      {errorMessage && (
+        <div className="mb-6 p-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
+          {errorMessage}
+        </div>
+      )}
 
       {/* Primary Details Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">RFQ Title</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            RFQ Title
+          </label>
           <input
             required
             type="text"
@@ -73,7 +140,9 @@ export default function CreateRfqForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">Category</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            Category
+          </label>
           <select
             name="category"
             className="w-full px-4 py-2.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-blue-600 text-slate-900"
@@ -85,7 +154,9 @@ export default function CreateRfqForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">Delivery Physical Address</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            Delivery Physical Address
+          </label>
           <input
             required
             type="text"
@@ -96,7 +167,9 @@ export default function CreateRfqForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">Bidding Deadline</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            Bidding Deadline
+          </label>
           <input
             required
             type="datetime-local"
@@ -109,7 +182,9 @@ export default function CreateRfqForm() {
       {/* Dynamic Line Items Section */}
       <div className="mb-8">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-md font-medium text-slate-900">Required Line Items</h3>
+          <h3 className="text-md font-medium text-slate-900">
+            Required Line Items
+          </h3>
           <button
             type="button"
             onClick={handleAddItem}
@@ -129,7 +204,7 @@ export default function CreateRfqForm() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item, index) => (
+              {items.map((item) => (
                 <tr key={item.id} className="border-b border-slate-100 last:border-0">
                   <td className="p-2">
                     <input
@@ -137,7 +212,9 @@ export default function CreateRfqForm() {
                       type="text"
                       placeholder="e.g., Core i7 16GB RAM, 512GB SSD"
                       value={item.description}
-                      onChange={(e) => handleItemChange(item.id, "description", e.target.value)}
+                      onChange={(e) =>
+                        handleItemChange(item.id, "description", e.target.value)
+                      }
                       className="w-full px-3 py-1.5 border border-slate-200 rounded focus:outline-none focus:border-blue-600 text-slate-800 text-sm"
                     />
                   </td>
@@ -147,7 +224,13 @@ export default function CreateRfqForm() {
                       type="number"
                       min="1"
                       value={item.quantity}
-                      onChange={(e) => handleItemChange(item.id, "quantity", parseInt(e.target.value) || 1)}
+                      onChange={(e) =>
+                        handleItemChange(
+                          item.id,
+                          "quantity",
+                          parseInt(e.target.value) || 1
+                        )
+                      }
                       className="w-full px-3 py-1.5 border border-slate-200 rounded focus:outline-none focus:border-blue-600 text-slate-800 text-sm"
                     />
                   </td>
@@ -168,10 +251,11 @@ export default function CreateRfqForm() {
         </div>
       </div>
 
-      {/* Form Submission */}
+      {/* Form Submission Controls */}
       <div className="flex justify-end gap-4 border-t border-slate-100 pt-6">
         <button
           type="button"
+          onClick={() => router.back()}
           className="px-5 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition"
         >
           Cancel
@@ -181,7 +265,7 @@ export default function CreateRfqForm() {
           disabled={isSubmitting}
           className="px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-sm disabled:opacity-50"
         >
-          {isSubmitting ? "Processing..." : "Publish RFQ"}
+          {isSubmitting ? "Publishing..." : "Publish RFQ"}
         </button>
       </div>
     </form>
