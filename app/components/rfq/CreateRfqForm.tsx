@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client"; // Adjust path to your browser client helper
-import { insertNewRfq } from "@/lib/supabase/actions"; // Adjust path to server action file
+import { createClient } from "@/lib/supabase/client";
+import { insertNewRfq } from "@/lib/supabase/actions";
 
 interface LineItem {
   id: string;
@@ -14,6 +14,7 @@ interface LineItem {
 export default function CreateRfqForm() {
   const router = useRouter();
   const supabase = createClient();
+  const [isPending, startTransition] = useTransition();
 
   const [items, setItems] = useState<LineItem[]>([
     { id: crypto.randomUUID(), description: "", quantity: 1 },
@@ -52,71 +53,97 @@ export default function CreateRfqForm() {
     setIsSubmitting(true);
     setErrorMessage(null);
 
+    const title = formData.get("title") as string;
+    const category = formData.get("category") as string;
+    const deliveryAddress = formData.get("deliveryAddress") as string;
+    const deadline = formData.get("deadline") as string;
+
+    const formattedLineItems = items
+      .filter((item) => item.description.trim() !== "")
+      .map(({ description, quantity }) => ({
+        description,
+        quantity: Number(quantity),
+      }));
+
+    if (formattedLineItems.length === 0) {
+      setErrorMessage("Please enter at least one item description.");
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
-      // 1. Verify user authentication session
+      // 1. Check user authentication
       const {
         data: { user },
         error: authError,
       } = await supabase.auth.getUser();
 
       if (authError || !user) {
-        // Prompt login if buyer is not signed in
-        const shouldLogin = window.confirm(
-          "You must be logged in to post an RFQ and track supplier responses. Would you like to log in or register now?"
+        // Unauthenticated Flow
+        const draftPayload = {
+          rfqData: {
+            title,
+            category,
+            delivery_address: deliveryAddress,
+            deadline,
+            status: "active",
+          },
+          lineItems: formattedLineItems,
+        };
+
+        sessionStorage.setItem(
+          "pending_rfq_draft",
+          JSON.stringify(draftPayload)
         );
-        if (shouldLogin) {
-          router.push("/login?redirect=/rfq/create");
-        }
-        setIsSubmitting(false);
+
+        router.push(
+          "/register?intent=publish_rfq&redirect=/dashboard/rfqs/sync"
+        );
         return;
       }
 
-      // 2. Format payload matching backend schema and explicit types
+      // 2. Authenticated Flow
       const rfqData = {
         buyer_id: user.id,
-        title: formData.get("title") as string,
-        category: formData.get("category") as string,
-        delivery_address: formData.get("deliveryAddress") as string,
-        deadline: formData.get("deadline") as string,
-        status: "active", // Crucial: matches .eq("status", "active") in supplier query
+        title,
+        category,
+        delivery_address: deliveryAddress,
+        deadline,
+        status: "active",
       };
 
-      const lineItems = items.map(({ description, quantity }) => ({
-        description,
-        quantity: Number(quantity),
-      }));
-
-      // 3. Persist directly to Supabase via server action
-      const result = await insertNewRfq(rfqData, lineItems);
+      const result = await insertNewRfq(rfqData, formattedLineItems);
 
       if (!result.success) {
-        setErrorMessage(result.error);
+        setErrorMessage(result.error || "Failed to submit RFQ.");
         setIsSubmitting(false);
         return;
       }
 
-      // 4. Redirect buyer to dashboard upon success
-      router.push("/dashboard/rfqs");
-      router.refresh();
+      // 3. Reset state & trigger non-blocking transition
+      formElement.reset();
+      setItems([{ id: crypto.randomUUID(), description: "", quantity: 1 }]);
 
-      // 4. Redirect buyer to their dashboard where the RFQ is listed
-      router.push("/dashboard/rfqs");
-      router.refresh();
-    } catch (err : unknown) {
+      startTransition(() => {
+        router.push("/dashboard/rfqs");
+      });
+    } catch (err: unknown) {
       if (err instanceof Error) {
-      setErrorMessage(err.message);
-      } else if (typeof err === "string"){
+        setErrorMessage(err.message);
+      } else if (typeof err === "string") {
         setErrorMessage(err);
-      } else{
-        setErrorMessage("failed to submit RFQ. Please try again");
+      } else {
+        setErrorMessage("Failed to submit RFQ. Please try again.");
       }
-    } finally {
       setIsSubmitting(false);
     }
   };
 
+  const isLoading = isSubmitting || isPending;
+
   return (
-    <form onSubmit={handleSubmit}
+    <form
+      onSubmit={handleSubmit}
       className="max-w-4xl mx-auto p-6 bg-white border border-slate-200 rounded-xl shadow-sm"
     >
       <div className="border-b border-slate-100 pb-4 mb-6">
@@ -130,7 +157,7 @@ export default function CreateRfqForm() {
 
       {errorMessage && (
         <div className="mb-6 p-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
-          {errorMessage}
+          ❌ {errorMessage}
         </div>
       )}
 
@@ -215,7 +242,10 @@ export default function CreateRfqForm() {
             </thead>
             <tbody>
               {items.map((item) => (
-                <tr key={item.id} className="border-b border-slate-100 last:border-0">
+                <tr
+                  key={item.id}
+                  className="border-b border-slate-100 last:border-0"
+                >
                   <td className="p-2">
                     <input
                       required
@@ -223,7 +253,11 @@ export default function CreateRfqForm() {
                       placeholder="e.g., Core i7 16GB RAM, 512GB SSD"
                       value={item.description}
                       onChange={(e) =>
-                        handleItemChange(item.id, "description", e.target.value)
+                        handleItemChange(
+                          item.id,
+                          "description",
+                          e.target.value
+                        )
                       }
                       className="w-full px-3 py-1.5 border border-slate-200 rounded focus:outline-none focus:border-blue-600 text-slate-800 text-sm"
                     />
@@ -272,10 +306,10 @@ export default function CreateRfqForm() {
         </button>
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isLoading}
           className="px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition shadow-sm disabled:opacity-50"
         >
-          {isSubmitting ? "Publishing..." : "Publish RFQ"}
+          {isLoading ? "Publishing & Redirecting..." : "Publish RFQ"}
         </button>
       </div>
     </form>

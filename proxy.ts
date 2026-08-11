@@ -48,7 +48,7 @@ export async function proxy(request: NextRequest) {
       if (path.startsWith('/buyer') && profile.role !== 'buyer_admin') {
         return NextResponse.redirect(new URL('/dashboard', request.url));
       }
-      if (path.startsWith('/dashboard') && profile.role !== 'supplier_admin') {
+      if (path.startsWith('/supplier') && profile.role !== 'supplier_admin') {
         return NextResponse.redirect(new URL('/login', request.url));
       }
     }
@@ -59,5 +59,5 @@ export async function proxy(request: NextRequest) {
 
 // Keep the same path matcher configuration
 export const config = {
-  matcher: ['/buyer/:path*', '/dashboard/:path*'],
+  matcher: ['/buyer/:path*', '/dashboard/:path*', '/supplier/:path*'],
 };

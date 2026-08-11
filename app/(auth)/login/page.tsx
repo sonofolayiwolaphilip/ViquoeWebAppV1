@@ -2,12 +2,17 @@
 
 import React, { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 export default function LoginPage() {
   const supabase = createClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Extract explicit redirect override if set in URL query parameters
+  const explicitRedirect = searchParams.get("redirect");
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -32,7 +37,14 @@ export default function LoginPage() {
     }
 
     if (data?.user) {
-      // Fetch user role from profiles table
+      // 1. If an explicit redirect param exists (e.g. sync route), prioritize it directly
+      if (explicitRedirect) {
+        router.push(explicitRedirect);
+        router.refresh();
+        return;
+      }
+
+      // 2. Fallback: Fetch user role from profiles table for default routing
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("role")
@@ -40,18 +52,22 @@ export default function LoginPage() {
         .single();
 
       if (profileError) {
-        setError(`Database Profile Error: ${profileError.message} (Code: ${profileError.code})`);
+        setError(
+          `Database Profile Error: ${profileError.message} (Code: ${profileError.code})`
+        );
         setLoading(false);
         return;
       }
 
       if (!profile) {
-        setError("Account authenticated successfully, but no matching profile record was found.");
+        setError(
+          "Account authenticated successfully, but no matching profile record was found."
+        );
         setLoading(false);
         return;
       }
 
-      // Explicit Role-Based Redirection
+      // Explicit Role-Based Redirection Fallback
       if (profile.role === "buyer_admin") {
         router.push("/rfq/new");
       } else if (profile.role === "supplier_admin") {
@@ -59,15 +75,25 @@ export default function LoginPage() {
       } else {
         router.push("/dashboard");
       }
+      router.refresh();
     }
   };
+
+  // Construct sign-up href preserving the redirect parameter if present
+  const signupHref = explicitRedirect
+    ? `/signup?redirect=${encodeURIComponent(explicitRedirect)}`
+    : "/signup";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-12">
       <div className="max-w-md w-full bg-white border border-slate-200 rounded-2xl shadow-sm p-8">
         <div className="text-center mb-8">
-          <h2 className="text-2xl font-bold text-slate-900 font-heading">Welcome to Viquoe</h2>
-          <p className="text-sm text-slate-500 mt-1">Log in to manage your procurement pipeline</p>
+          <h2 className="text-2xl font-bold text-slate-900 font-heading">
+            Welcome to Viquoe
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">
+            Log in to manage your procurement pipeline
+          </p>
         </div>
 
         {error && (
@@ -78,7 +104,9 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1.5">Email Address</label>
+            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1.5">
+              Email Address
+            </label>
             <input
               required
               type="email"
@@ -89,7 +117,9 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1.5">Password</label>
+            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1.5">
+              Password
+            </label>
             <input
               required
               type="password"
@@ -110,7 +140,10 @@ export default function LoginPage() {
 
         <div className="mt-6 text-center text-xs text-slate-500">
           New to the platform?{" "}
-          <Link href="/signup" className="text-blue-600 hover:underline font-medium">
+          <Link
+            href={signupHref}
+            className="text-blue-600 hover:underline font-medium"
+          >
             Register your business
           </Link>
         </div>
